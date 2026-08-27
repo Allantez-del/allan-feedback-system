@@ -64,6 +64,16 @@ resource "aws_iam_role_policy" "lambda_dynamodb" {
   })
 }
 
+resource "aws_cloudwatch_log_group" "feedback_lambda" {
+  name              = "/aws/lambda/allan-feedback-handler"
+  retention_in_days = 14
+
+  tags = {
+    Project     = "Allan Feedback System"
+    Environment = "dev"
+  }
+}
+
 resource "aws_lambda_function" "feedback" {
   function_name = "allan-feedback-handler"
 
@@ -135,4 +145,27 @@ resource "aws_lambda_permission" "api_gateway" {
   principal     = "apigateway.amazonaws.com"
 
   source_arn = "${aws_apigatewayv2_api.feedback_api.execution_arn}/*/*"
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  alarm_name        = "allan-feedback-lambda-errors"
+  alarm_description = "Alarm when the Allan Feedback Lambda reports errors."
+
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.feedback.function_name
+  }
+
+  tags = {
+    Project     = "Allan Feedback System"
+    Environment = "dev"
+  }
 }
