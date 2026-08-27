@@ -1,0 +1,3 @@
+{
+  "body": "{\"customerName\":\"Jane Doe\",\"email\":\"jane@example.com\",\"rating\":5,\"category\":\"INVALID\",\"message\":\"Test invalid feedback.\"}"
+}
