@@ -19,3 +19,10 @@ venv/
 # Operating system files
 Thumbs.db
 .DS_Store
+
+# Temporary build/inspection directories
+**/zip-check/
+
+# Generated API/Lambda test responses
+*-response.json
+response.json

@@ -1,724 +1,1011 @@
-Allan Feedback System
+# Allan Feedback System
 
-A serverless feedback collection API built on AWS Lambda, API Gateway, and DynamoDB. This system validates and stores customer feedback across multiple categories with a simple REST API.
+A serverless customer feedback API built on AWS using API Gateway, AWS Lambda, Amazon DynamoDB, Amazon Cognito, IAM, CloudWatch, and Terraform.
 
+The system allows customers to submit feedback through a public API endpoint while protecting feedback retrieval behind Cognito JWT authentication for authorized staff.
 
+---
 
-Table of Contents
+## Table of Contents
 
-Prerequisites
-Project Structure
-Installation & Setup
-Commands
-Deployment
-API Usage
-Test Cases
-Troubleshooting
-Verification Checklist
+- [Project Overview](#project-overview)
+- [Business Problem](#business-problem)
+- [Architecture](#architecture)
+- [AWS Services](#aws-services)
+- [API Design](#api-design)
+- [Security](#security)
+- [Monitoring](#monitoring)
+- [Project Structure](#project-structure)
+- [Prerequisites](#prerequisites)
+- [Deployment](#deployment)
+- [Terraform Configuration](#terraform-configuration)
+- [Testing](#testing)
+- [Cost and Scalability](#cost-and-scalability)
+- [Current Limitations](#current-limitations)
+- [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
+- [Cleanup](#cleanup)
 
+---
 
+# Project Overview
 
-Prerequisites
+The Allan Feedback System is a serverless AWS application for collecting and retrieving customer feedback.
 
-Required Software
+Customers can submit feedback containing:
 
-Python 3.13 or later
-Terraform 1.0 or later (for infrastructure deployment)
-AWS CLI v2 (for AWS account interaction)
-Git 2.0 or later
+- rating
+- category
+- message
+- optional customer name
+- optional email address
 
-AWS Account & Credentials
+Submitted feedback is validated by AWS Lambda and stored in Amazon DynamoDB.
 
-An active AWS account with programmatic access enabled
-AWS credentials configured locally:
-  aws configure
-  Provide your AWS Access Key ID, Secret Access Key, and region (default: eu-central-1)
+Authorized staff can retrieve submitted feedback through a protected API route using Amazon Cognito authentication.
 
-Environment Setup
+The infrastructure is provisioned and managed with Terraform.
 
-Before deployment, ensure the following:
+---
 
-AWS Region: This project is configured for eu-central-1. To use a different region, update terraform/providers.tf.
-Terraform State: Terraform will create a local state file in terraform/terraform.tfstate. For production, configure remote state (e.g., S3 backend).
-IAM Permissions: Your AWS user must have permissions for:
-DynamoDB (CreateTable, PutItem, DescribeTable)
-Lambda (CreateFunction, UpdateFunctionCode, InvokeFunction)
-API Gateway (CreateApi, CreateRoute, CreateIntegration, CreateStage)
-IAM (CreateRole, AttachRolePolicy, PutRolePolicy)
+# Business Problem
 
-Optional Tools
+Organizations need a simple way to collect customer feedback without maintaining dedicated application servers or database infrastructure.
 
-curl or Postman for testing the API manually
-Python virtual environment (for local testing)
-AWS SAM CLI (for local Lambda testing, optional)
+The system was designed to provide:
 
+- public customer feedback submission
+- input validation
+- persistent serverless storage
+- protected staff access
+- centralized monitoring
+- infrastructure as code
+- low operational overhead
+- usage-based scaling
 
+A serverless architecture was selected because feedback traffic can be irregular and does not require continuously running compute resources.
 
-Project Structure
+---
 
-.
-├── README.md                      # This file
-├── lambda/
-│   ├── feedback_handler.py       # Lambda function source code
-│   └── feedback_handler.zip      # Compiled function package
-├── terraform/
-│   ├── main.tf                   # Core infrastructure (Lambda, API Gateway, DynamoDB)
-│   ├── providers.tf              # AWS provider configuration
-│   ├── outputs.tf                # Terraform output values (API endpoint)
-│   └── terraform.tfstate         # Terraform state file (auto-generated)
-├── docs/
-│   └── api/                      # API documentation (future)
-├── test-event.json               # Sample valid feedback payload for testing
-├── invalid-event.json            # Sample invalid feedback payload for testing
-├── response.json                 # Example successful API response
-└── invalid-response.json         # Example error API response
+# Architecture
 
-Key Components
+## High-Level Architecture
 
-lambda/feedback_handler.py: AWS Lambda handler that validates feedback payloads and stores them in DynamoDB
-terraform/main.tf: Defines DynamoDB table, Lambda function, API Gateway HTTP API, IAM roles, and integrations
-terraform/outputs.tf: Outputs the API endpoint URL for client testing
+```mermaid
+flowchart LR
+    Customer[Customer]
+    Staff[Authorized Staff]
+    Cognito[Amazon Cognito]
+    API[Amazon API Gateway]
+    Lambda[AWS Lambda]
+    DDB[(Amazon DynamoDB)]
+    CW[Amazon CloudWatch]
 
+    Customer -->|POST /feedback| API
+    Staff -->|Authenticate| Cognito
+    Cognito -->|JWT| Staff
+    Staff -->|GET /feedback + JWT| API
+    API --> Lambda
+    Lambda --> DDB
+    Lambda --> CW
+    API --> CW
+    DDB --> CW
+```
 
+## Request Flow
 
-Installation & Setup
+### Customer Feedback Submission
 
-Step 1: Clone the Repository
+```
+Customer
+   |
+   | POST /feedback
+   v
+API Gateway
+   |
+   v
+AWS Lambda
+   |
+   | Validate and PutItem
+   v
+Amazon DynamoDB
+```
 
-git clone https://github.com/Allantez-del/allan-feedback-system.git
-cd allan-feedback-system
+### Staff Feedback Retrieval
 
-Step 2: Verify Prerequisites
+```
+Staff
+   |
+   | Authenticate
+   v
+Amazon Cognito
+   |
+   | JWT
+   v
+API Gateway GET /feedback
+   |
+   v
+AWS Lambda
+   |
+   | Scan
+   v
+Amazon DynamoDB
+```
 
-# Check Python version
-python --version
+CloudWatch provides logging, metrics, dashboard visualization, and Lambda error monitoring.
 
-# Check Terraform version
-terraform version
+---
 
-# Check AWS CLI configuration
-aws sts get-caller-identity
+# AWS Services
 
-Expected output from aws sts get-caller-identity:
+| Service | Purpose |
+| --- | --- |
+| Amazon API Gateway | Exposes the HTTP API |
+| AWS Lambda | Runs validation, submission, and retrieval logic |
+| Amazon DynamoDB | Stores feedback records |
+| Amazon Cognito | Authenticates staff users |
+| AWS IAM | Controls Lambda access to AWS resources |
+| Amazon CloudWatch | Provides logs, metrics, dashboard, and alarm |
+| Terraform | Provisions and manages AWS infrastructure |
+
+The application is deployed in:
+
+```
+eu-central-1
+```
+
+The AWS region is configurable through Terraform variables.
+
+---
+
+# API Design
+
+The application exposes two routes.
+
+## POST /feedback
+
+Public endpoint for customer feedback submission.
+
+```
+POST /feedback
+```
+
+Authentication is intentionally not required.
+
+Example request:
+
+```
 {
-    "UserId": "AIDAI...",
-    "Account": "123456789012",
-    "Arn": "arn:aws:iam::123456789012:user/your-user"
-}
-
-Step 3: Prepare the Lambda Package
-
-The Lambda function is pre-packaged in lambda/feedback_handler.zip. If you need to rebuild it after code changes:
-
-cd lambda
-pip install -r requirements.txt -t .  # (Note: create requirements.txt if it doesn't exist)
-zip -r feedback_handler.zip feedback_handler.py
-cd ..
-
-For the current setup, boto3 is available in the Lambda runtime, so no additional dependencies are needed.
-
-Step 4: Initialize Terraform
-
-cd terraform
-terraform init
-
-This downloads AWS provider plugins and prepares the Terraform working directory.
-
-
-
-Commands
-
-Build & Package
-
-# Rebuild the Lambda function package (if code changes were made)
-cd lambda
-zip -r feedback_handler.zip feedback_handler.py
-cd ..
-
-Deployment
-
-cd terraform
-
-# Plan the deployment (shows what will be created/modified)
-terraform plan
-
-# Apply the deployment (creates infrastructure)
-terraform apply
-
-# Output the API endpoint
-terraform output api_endpoint
-
-Testing
-
-# Test the API with a valid feedback submission
-curl -X POST <API_ENDPOINT>/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customerName": "Jane Doe",
-    "email": "jane@example.com",
-    "rating": 5,
-    "category": "service",
-    "message": "The customer support was very helpful."
-  }'
-
-# Test with an invalid category (should fail)
-curl -X POST <API_ENDPOINT>/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 5,
-    "category": "invalid_category",
-    "message": "This should fail."
-  }'
-
-Cleanup
-
-cd terraform
-
-# Destroy all infrastructure (WARNING: deletes the DynamoDB table and its data)
-terraform destroy
-
-# Confirm the destruction
-# Type 'yes' when prompted
-
-
-
-Deployment
-
-Initial Deployment
-
-Plan: Review what will be created
-  cd terraform
-   terraform plan
-
-Apply: Deploy infrastructure to AWS
-   terraform apply
-   Confirm with yes when prompted. Terraform will:
-Create a DynamoDB table named allan-feedback
-Create a Lambda function named allan-feedback-handler
-Create an API Gateway HTTP API named allan-feedback-api
-Set up IAM roles and policies
-Output the API endpoint URL
-
-Verify: Note the API endpoint from the output:
-  Outputs:
-
-   api_endpoint = "https://xxxxxxx.eu-central-1.amazonaws.com"
-
-Updating Code After Changes
-
-If you modify lambda/feedback_handler.py:
-
-Rebuild the zip file:
-  cd lambda
-   zip -r feedback_handler.zip feedback_handler.py
-   cd ..
-
-Redeploy:
-  cd terraform
-   terraform apply
-
-Production Considerations
-
-For production deployments:
-
-State Management: Configure remote Terraform state (S3 + DynamoDB locking)
-Point-in-Time Recovery: Already enabled in main.tf for DynamoDB
-Monitoring: Add CloudWatch alarms and metrics
-Versioning: Tag deployments with git tag and terraform workspace
-Rollback: Keep previous state files; use terraform state commands to roll back
-
-
-
-API Usage
-
-Endpoint
-
-POST <API_ENDPOINT>/feedback
-
-Request Format
-
-Headers:
-Content-Type: application/json
-
-Body (JSON):
-{
+  "customerName": "Jane Doe",
+  "email": "jane@example.com",
   "rating": 5,
   "category": "service",
-  "message": "The customer support was very helpful.",
-  "customerName": "Jane Doe",
-  "email": "jane@example.com"
+  "message": "The customer support was very helpful."
 }
+```
 
-Field Specifications
+Successful response:
 
-Field
-Type
-Required
-Notes
-rating
-Integer
-Yes
-Must be 1–5 inclusive
-category
-String
-Yes
-One of: service, product, delivery, website, complaint, suggestion, other
-message
-String
-Yes
-Non-empty string; leading/trailing whitespace is trimmed
-customerName
-String
-No
-If provided, is trimmed of whitespace
-email
-String
-No
-If provided, is trimmed of whitespace
+```
+201 Created
+```
 
-Response Codes
+Example response:
 
-Code
-Meaning
-Example Response
-201
-Feedback submitted successfully
-{"message": "Feedback submitted successfully.", "feedbackId": "uuid"}
-400
-Invalid request (validation error)
-{"error": "rating must be an integer from 1 to 5"}
-500
-Server error
-{"error": "Internal server error"}
-
-Success Response (201)
-
+```
 {
   "message": "Feedback submitted successfully.",
-  "feedbackId": "e4836d42-b4bb-449e-a48b-2d96f4924c4d"
+  "feedbackId": "generated-feedback-id"
 }
+```
 
-The feedbackId is a UUID that uniquely identifies the feedback submission and is stored in DynamoDB with a timestamp.
+## GET /feedback
 
+Protected endpoint for staff feedback retrieval.
 
+```
+GET /feedback
+```
 
-Test Cases
+A valid Cognito JWT is required.
 
-Happy Path: Valid Feedback Submission
+Authorization header:
 
-Objective: Verify that valid feedback is accepted and stored.
+```
+Authorization: Bearer <JWT_TOKEN>
+```
 
-Request:
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customerName": "Jane Doe",
-    "email": "jane@example.com",
-    "rating": 5,
-    "category": "service",
-    "message": "The customer support was very helpful."
-  }'
+Without valid authentication, API Gateway returns:
 
-Expected Response (201):
-{
-  "message": "Feedback submitted successfully.",
-  "feedbackId": "e4836d42-b4bb-449e-a48b-2d96f4924c4d"
-}
+```
+401 Unauthorized
+```
 
-Verification: Log into AWS Console → DynamoDB → Tables → allan-feedback → Items. You should see a new item with the submitted feedback.
+With valid authentication, the endpoint returns:
 
+```
+200 OK
+```
 
+The current implementation retrieves up to 20 feedback records and orders them by submission timestamp with the newest records first.
 
-Validation Error: Invalid Rating
+Detailed API documentation is available in:
 
-Objective: Verify that invalid ratings are rejected.
+```
+docs/api/api-design.md
+```
 
-Test Case 1: Rating out of range (too high)
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 10,
-    "category": "service",
-    "message": "Feedback message."
-  }'
+---
 
-Expected Response (400):
-{
-  "error": "rating must be an integer from 1 to 5"
-}
+# Input Validation
 
-Test Case 2: Rating is not an integer
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": "5",
-    "category": "service",
-    "message": "Feedback message."
-  }'
+The Lambda function validates submitted feedback before storing it.
 
-Expected Response (400):
-{
-  "error": "rating must be an integer from 1 to 5"
-}
+Current validation includes:
 
-Test Case 3: Rating missing
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "category": "service",
-    "message": "Feedback message."
-  }'
+- rating must be an integer from 1 to 5
+- category must be supported
+- message must be present
+- message must not be empty
+- message must not exceed 2000 characters
+- optional customerName must be a string
+- optional email must be a string
 
-Expected Response (400):
-{
-  "error": "rating must be an integer from 1 to 5"
-}
+Supported categories:
 
+```
+service
+product
+delivery
+website
+complaint
+suggestion
+other
+```
 
+Invalid requests return:
 
-Validation Error: Invalid Category
+```
+400 Bad Request
+```
 
-Objective: Verify that invalid categories are rejected.
+---
 
-Request:
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 5,
-    "category": "INVALID",
-    "message": "Feedback message."
-  }'
+# Security
 
-Expected Response (400):
-{
-  "error": "Invalid category"
-}
+## Authentication
 
-Valid categories: service, product, delivery, website, complaint, suggestion, other
+The GET route is protected by Amazon Cognito.
 
+API Gateway uses a JWT authorizer to validate staff authentication before allowing access to feedback retrieval.
 
+The POST route remains public by design because customers should not require staff accounts to submit feedback.
 
-Validation Error: Empty or Missing Message
-
-Objective: Verify that empty messages are rejected.
-
-Test Case 1: Message is empty string
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 5,
-    "category": "service",
-    "message": ""
-  }'
-
-Expected Response (400):
-{
-  "error": "message is required"}
-
-Test Case 2: Message is whitespace only
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 5,
-    "category": "service",
-    "message": "   "
-  }'
+## IAM Least Privilege
 
-Expected Response (400):
-{
-  "error": "message is required"}
-
-Test Case 3: Message is not a string
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 5,
-    "category": "service",
-    "message": 123
-  }'
-
-Expected Response (400):
-{
-  "error": "message is required"}
+The Lambda execution role is restricted to the DynamoDB operations required by the application:
 
+```
+dynamodb:PutItem
+dynamodb:Scan
+```
 
+Permissions are scoped to the feedback table.
 
-Validation Error: Invalid JSON
+Clients do not receive direct DynamoDB permissions.
 
-Objective: Verify that malformed JSON is rejected.
+## Error Handling
 
-Request:
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{invalid json}'
+Unexpected application failures return a generic client response.
 
-Expected Response (400):
-{
-  "error": "Invalid JSON body"}
+Technical troubleshooting details are recorded in CloudWatch instead of being exposed through the API.
 
+## CORS
 
+The development API currently allows:
 
-Edge Case: Optional Fields
+```
+allow_origins = ["*"]
+```
 
-Objective: Verify that optional fields (customerName, email) work correctly.
+This is useful while no permanent frontend domain exists.
 
-Test Case 1: All optional fields omitted
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 5,
-    "category": "service",
-    "message": "Feedback without optional fields."
-  }'
+A production deployment should restrict allowed origins to trusted frontend domains.
 
-Expected Response (201):
-{
-  "message": "Feedback submitted successfully.",
-  "feedbackId": "uuid"
-}
+## Secrets
 
-Verification: The DynamoDB item will not have customerName or email fields.
+Passwords and JWT tokens must never be stored in the repository.
 
-Test Case 2: Only customerName provided
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 3,
-    "category": "product",
-    "message": "Good product.",
-    "customerName": "John Smith"
-  }'
+Terraform state files, environment files, Python cache files, and temporary inspection directories are excluded from Git.
 
-Expected Response (201):
-{
-  "message": "Feedback submitted successfully.",
-  "feedbackId": "uuid"
-}
+---
 
-Verification: The item will have customerName but no email.
+# Monitoring
 
-Test Case 3: Whitespace trimming
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 4,
-    "category": "delivery",
-    "message": "  Message with spaces.  ",
-    "customerName": "  Jane Doe  ",
-    "email": "  jane@example.com  "
-  }'
+Amazon CloudWatch provides observability for the application.
 
-Expected Response (201):
-{
-  "message": "Feedback submitted successfully.",
-  "feedbackId": "uuid"
-}
+## Dashboard
 
-Verification: In DynamoDB, all strings are trimmed (no leading/trailing spaces).
+Terraform creates:
 
+```
+allan-feedback-dashboard
+```
 
+The dashboard monitors:
 
-Edge Case: Special Characters in Message
+### Lambda
 
-Objective: Verify that special characters and quotes are handled correctly.
+- Invocations
+- Errors
+- Throttles
+- Duration
 
-Request:
-curl -X POST https://xxxxxxx.eu-central-1.amazonaws.com/feedback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 5,
-    "category": "suggestion",
-    "message": "I love your service! It'\''s amazing. Price: $99.99. Unicode: 你好 🚀"
-  }'
+### API Gateway
 
-Expected Response (201):
-{
-  "message": "Feedback submitted successfully.",
-  "feedbackId": "uuid"
-}
+- Request Count
+- 4xx responses
+- 5xx responses
 
+### DynamoDB
 
+- ConsumedReadCapacityUnits
+- ConsumedWriteCapacityUnits
+- ReadThrottleEvents
+- WriteThrottleEvents
 
-Troubleshooting
+## Lambda Error Alarm
 
-Issue: aws configure not working or credentials not found
+Terraform creates:
 
-Symptom: Error: The AWS Access Key ID and Secret Access Key are required.
+```
+allan-feedback-lambda-errors
+```
 
-Solution:
-Run aws configure and provide your credentials
-Verify with aws sts get-caller-identity
-Check credentials file at ~/.aws/credentials (Linux/Mac) or %USERPROFILE%\.aws\credentials (Windows)
+The alarm monitors Lambda execution errors.
 
+The current project does not create separate API Gateway or DynamoDB alarms.
 
+## Lambda Logs
 
-Issue: Terraform init fails with provider errors
+The Lambda log group is:
 
-Symptom: Error: Failed to query available provider packages
+```
+/aws/lambda/allan-feedback-handler
+```
 
-Solution:
-Ensure you have internet connectivity
-Update Terraform: terraform version and download latest from terraform.io
-Remove .terraform and terraform.lock.hcl, then retry terraform init
+Log retention is configured for:
 
+```
+14 days
+```
 
+Detailed monitoring documentation is available in:
 
-Issue: Terraform apply fails with permission errors
+```
+docs/monitoring.md
+```
 
-Symptom: Error: creating DynamoDB Table: AccessDenied
+---
 
-Solution:
-Verify IAM permissions: Check that your AWS user has DynamoDB, Lambda, and API Gateway permissions
-Attach policy: AWSLambdaFullAccess, AmazonDynamoDBFullAccess, APIGatewayAdministrator (or custom least-privilege policy)
-Check region: Ensure terraform/providers.tf specifies the correct region where you have permissions
+# Project Structure
 
+```
+.
+|-- .gitignore
+|-- README.md
+|-- get-feedback-event.json
+|-- invalid-event.json
+|-- test-event.json
+|
+|-- docs/
+|   |-- api/
+|   |   `-- api-design.md
+|   |
+|   |-- architecture/
+|   |-- cost-analysis.md
+|   |-- monitoring.md
+|   |-- testing.md
+|   `-- well-architected-review.md
+|
+|-- lambda/
+|   |-- feedback_handler.py
+|   `-- feedback_handler.zip
+|
+|-- terraform/
+|   |-- .terraform.lock.hcl
+|   |-- main.tf
+|   |-- missing-rating-event.json
+|   |-- outputs.tf
+|   |-- providers.tf
+|   `-- variables.tf
+|
+`-- tests/
+```
 
+Local development files such as Terraform state, `.terraform/`, Python cache directories, and temporary ZIP inspection directories are intentionally excluded from source control.
 
-Issue: API endpoint not created or deploy fails
+---
 
-Symptom: Error: creating AWS Lambda Function: ResourceConflictException or endpoint is null
+# Prerequisites
 
-Solution:
-Check if resources already exist: aws lambda list-functions, aws dynamodb list-tables
-If they exist but Terraform doesn't know about them, either:
-Delete them in AWS Console and retry
-Import them: terraform import aws_lambda_function.feedback <function-name>
-Ensure lambda/feedback_handler.zip exists and is valid
-Check Terraform plan before applying: terraform plan
+Required software:
 
+- Terraform
+- AWS CLI v2
+- Python 3.13 or compatible runtime
+- Git
+- PowerShell or another command shell
+- AWS account with sufficient deployment permissions
 
+Verify the tools:
 
-Issue: Lambda function returns 500 error
+```
+python --version
+terraform version
+aws --version
+git --version
+```
 
-Symptom: All requests return {"error": "Internal server error"}
+Verify the active AWS identity:
 
-Solution:
-Check Lambda logs in AWS CloudWatch:
-   aws logs tail /aws/lambda/allan-feedback-handler --follow
-Common causes:
-FEEDBACK_TABLE_NAME environment variable not set (check in Lambda console)
-IAM role missing DynamoDB permissions
-DynamoDB table doesn't exist or was deleted
-Redeploy to fix: cd terraform && terraform apply
+```
+aws sts get-caller-identity
+```
 
+---
 
+# Deployment
 
-Issue: DynamoDB table not accepting writes
+## 1. Clone the Repository
 
-Symptom: 403 Forbidden or ValidationException when submitting feedback
+```
+git clone https://github.com/Allantez-del/allan-feedback-system.git
+cd allan-feedback-system
+```
 
-Solution:
-Verify table exists: aws dynamodb describe-table --table-name allan-feedback
-Check Lambda IAM policy: Should allow dynamodb:PutItem on the feedback table
-Verify Lambda environment variable: FEEDBACK_TABLE_NAME should be allan-feedback
-Check billing mode: PAY_PER_REQUEST means no provisioned capacity limits
+## 2. Initialize Terraform
 
+```
+cd terraform
+terraform init
+```
 
+## 3. Format the Configuration
 
-Issue: Lambda deployment package is outdated
+```
+terraform fmt
+```
 
-Symptom: Code changes don't appear when testing the API
+## 4. Validate Terraform
 
-Solution:
-Rebuild the zip: cd lambda && zip -r feedback_handler.zip feedback_handler.py
-Redeploy: cd terraform && terraform apply
-Verify in AWS Lambda console → Code → Last modified timestamp
+```
+terraform validate
+```
 
+Expected result:
 
+```
+Success! The configuration is valid.
+```
 
-Issue: CORS errors when calling from browser
+## 5. Review the Deployment Plan
 
-Symptom: Cross-Origin Request Blocked in browser console
+```
+terraform plan
+```
 
-Solution:
-The API Gateway currently has no CORS configuration. To enable CORS:
-In terraform/main.tf, add CORS configuration to aws_apigatewayv2_api:
-  cors_configuration {
-     allow_origins     = ["*"]
-     allow_methods     = ["POST"]
-     allow_headers     = ["content-type"]
-     max_age           = 300
-   }
-Redeploy: terraform apply
-For production, replace "*" with specific allowed origins
+Always review the proposed infrastructure changes before applying them.
 
+## 6. Deploy
 
+```
+terraform apply
+```
 
-Verification Checklist
+Review the plan and confirm the deployment when prompted.
 
-Use this checklist to confirm everything is working correctly:
+## 7. View Outputs
 
-Pre-Deployment Checklist
+```
+terraform output
+```
 
-AWS credentials are configured (aws sts get-caller-identity shows your account)
-Terraform is installed and version is 1.0+
-Python 3.13+ is available
-Git repository is cloned and current branch is main
-lambda/feedback_handler.zip exists and is not empty
-terraform/ directory contains main.tf, providers.tf, and outputs.tf
+Terraform provides:
 
-Deployment Checklist
+- API endpoint
+- Cognito User Pool ID
+- Cognito App Client ID
 
-Run terraform init successfully (.terraform directory created)
-Run terraform plan shows expected resources (DynamoDB table, Lambda, API Gateway)
-Run terraform apply completes without errors
-Note the API endpoint from terraform output api_endpoint
-AWS Console shows new resources:
-DynamoDB table: allan-feedback
-Lambda function: allan-feedback-handler
-API Gateway API: allan-feedback-api
+The API endpoint can also be displayed individually:
 
-API Testing Checklist
+```
+terraform output api_endpoint
+```
 
-Happy Path: Submit valid feedback and receive 201 response with feedbackId
-Invalid Rating: Submit rating outside 1–5 range, receive 400 error
-Invalid Category: Submit unknown category, receive 400 error
-Empty Message: Submit empty message, receive 400 error
-Invalid JSON: Submit malformed JSON, receive 400 error
-Optional Fields: Submit feedback without customerName and email, still works
-Whitespace Trimming: Submit fields with leading/trailing spaces, verified in DynamoDB
-Special Characters: Submit message with Unicode and symbols, stored correctly
+---
 
-DynamoDB Verification
+# Lambda Deployment Package
 
-Open AWS Console → DynamoDB → Tables → allan-feedback
-Verify table has items from your API tests
-Check item structure: feedbackId (UUID), rating, category, message, submittedAt, optional customerName and email
-Verify submittedAt is in ISO 8601 format (e.g., 2026-08-31T15:19:26.932+02:00)
-Point-in-time recovery is enabled (check in table settings)
+Terraform deploys:
 
-Cleanup Checklist (when destroying)
+```
+lambda/feedback_handler.zip
+```
 
-Back up any important feedback data if needed
-Run terraform destroy and confirm with yes
-Verify in AWS Console that resources are deleted:
-DynamoDB table allan-feedback gone
-Lambda function allan-feedback-handler gone
-API Gateway allan-feedback-api gone
-IAM role allan-feedback-lambda-role gone
+If `feedback_handler.py` is modified, rebuild the deployment ZIP before applying Terraform.
 
+From the repository root in PowerShell:
 
+```
+Compress-Archive `
+  -Path .\lambda\feedback_handler.py `
+  -DestinationPath .\lambda\feedback_handler.zip `
+  -Force
+```
 
-Next Steps
+Then run:
 
-Monitoring: Add CloudWatch alarms for Lambda errors and DynamoDB throttling
-Authentication: Implement API key or OAuth authentication
-Feedback Retrieval: Add GET endpoints to retrieve feedback (with sorting/filtering)
-Batch Operations: Add support for bulk feedback submission
-Notifications: Send confirmation emails or Slack notifications on feedback submission
-Analytics: Generate reports on feedback trends by category and rating
-Multi-Region: Replicate infrastructure to other AWS regions for high availability
+```
+cd terraform
+terraform plan
+terraform apply
+```
 
+The current Lambda function uses libraries available in the AWS Lambda Python runtime and does not require a separate third-party dependency package.
 
+---
 
-Support
+# Terraform Configuration
 
-For issues or questions:
-Check the Troubleshooting section above
-Review AWS CloudWatch logs: aws logs tail /aws/lambda/allan-feedback-handler
-Check Terraform output: terraform output -json for detailed resource info
-Review the source code: lambda/feedback_handler.py
+Terraform configuration is stored in:
 
+```
+terraform/
+```
 
+## Files
 
-License
+`main.tf`
+
+Defines the main AWS resources, including:
+
+- DynamoDB
+- IAM
+- Lambda
+- API Gateway
+- Cognito
+- CloudWatch
+
+`providers.tf`
+
+Defines the AWS provider.
+
+`variables.tf`
+
+Defines configurable project values.
+
+Current variables include:
+
+```
+aws_region
+project_name
+environment
+```
+
+Default values are:
+
+```
+aws_region   = eu-central-1
+project_name = Allan Feedback System
+environment  = dev
+```
+
+`outputs.tf`
+
+Provides:
+
+```
+api_endpoint
+cognito_user_pool_id
+cognito_app_client_id
+```
+
+`.terraform.lock.hcl`
+
+Records the selected Terraform provider versions and is intentionally committed to source control.
+
+## Changing the AWS Region
+
+The deployment region is controlled through:
+
+```
+var.aws_region
+```
+
+It can be overridden without editing `providers.tf`.
+
+Example:
+
+```
+terraform plan -var="aws_region=eu-west-1"
+```
+
+## Terraform State
+
+Terraform state is currently stored locally for this development project.
+
+State files are excluded from Git.
+
+A production deployment should use a secured remote Terraform state backend with appropriate access control and state locking.
+
+---
+
+# Testing
+
+The system has been tested across successful requests, invalid input, authentication, error handling, and Terraform configuration.
+
+## Main Results
+
+| Test | Expected Result | Status |
+| --- | --- | --- |
+| Valid POST | 201 | Passed |
+| Invalid feedback | 400 | Passed |
+| GET without JWT | 401 | Passed |
+| GET with valid JWT | 200 | Passed |
+| Public POST after Cognito | 201 | Passed |
+| Controlled server error | 500 | Passed |
+| Terraform validate | Valid | Passed |
+| Terraform plan after Week 4 refactor | No changes | Passed |
+
+## POST Test
+
+Example using PowerShell:
+
+```
+$api = terraform output -raw api_endpoint
+
+$body = @{
+    customerName = "Jane Doe"
+    email        = "jane@example.com"
+    rating       = 5
+    category     = "service"
+    message      = "The customer support was very helpful."
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "$api/feedback" `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+Expected result:
+
+```
+201 Created
+```
+
+## Unauthorized GET Test
+
+Calling GET without a JWT should return:
+
+```
+401 Unauthorized
+```
+
+## Authorized GET Test
+
+A valid Cognito JWT must be supplied in the Authorization header.
+
+JWT tokens must not be committed to Git or stored in project documentation.
+
+Detailed test documentation is available in:
+
+```
+docs/testing.md
+```
+
+---
+
+# Cost and Scalability
+
+The system uses serverless and managed AWS services.
+
+Primary cost drivers are:
+
+- API Gateway requests
+- Lambda requests and execution duration
+- DynamoDB reads, writes, and storage
+- CloudWatch usage
+- Cognito authentication usage
+
+The architecture avoids continuously running EC2 application servers.
+
+DynamoDB uses:
+
+```
+PAY_PER_REQUEST
+```
+
+This is suitable for a workload with low or unpredictable traffic because capacity does not need to be permanently provisioned.
+
+The architecture can scale from a small demonstration workload toward much larger traffic volumes without redesigning the complete application.
+
+The main scaling and cost limitation is currently the GET access pattern.
+
+GET uses:
+
+```
+DynamoDB Scan
+```
+
+For a large production dataset, this should be redesigned using Query-based access, suitable indexes, and pagination.
+
+Detailed cost analysis is available in:
+
+```
+docs/cost-analysis.md
+```
+
+---
+
+# Well-Architected Review
+
+The project was reviewed against AWS Well-Architected principles covering:
+
+- Security
+- Reliability
+- Performance Efficiency
+- Cost Optimization
+- Scalability
+- Operational Excellence
+
+Important strengths include:
+
+- serverless architecture
+- protected staff retrieval
+- least-privilege database access
+- managed AWS services
+- DynamoDB Point-in-Time Recovery
+- monitoring and logging
+- infrastructure as code
+- usage-based scaling
+
+The complete review is available in:
+
+```
+docs/well-architected-review.md
+```
+
+---
+
+# Current Limitations
+
+The project is intentionally designed as a demonstration-scale serverless application.
+
+Current limitations include:
+
+- GET uses DynamoDB Scan
+- GET returns a maximum of 20 records
+- pagination is not implemented
+- CORS currently allows all origins
+- POST is public
+- no AWS WAF configuration
+- no custom API domain
+- no frontend application
+- Terraform state is local
+- no CI/CD pipeline
+- only one CloudWatch alarm is currently configured
+- no cross-region disaster-recovery architecture
+
+These limitations provide clear areas for future production improvement.
+
+---
+
+# Troubleshooting
+
+## AWS Authentication Problems
+
+Verify the active AWS identity:
+
+```
+aws sts get-caller-identity
+```
+
+If the AWS CLI session has expired, authenticate again using the configured AWS CLI authentication method.
+
+---
+
+## Terraform Initialization Problems
+
+Run:
+
+```
+terraform init
+```
+
+If the provider installation is damaged, the local `.terraform` directory can be regenerated.
+
+Do not delete `.terraform.lock.hcl` simply to solve a normal initialization problem; the lock file is intentionally tracked to keep provider selection reproducible.
+
+---
+
+## Terraform Permission Errors
+
+If Terraform returns `AccessDenied`, verify that the AWS identity used for deployment has permissions to manage the required resources:
+
+- Lambda
+- DynamoDB
+- API Gateway
+- IAM
+- Cognito
+- CloudWatch
+
+Review:
+
+```
+aws sts get-caller-identity
+```
+
+and:
+
+```
+terraform plan
+```
+
+before retrying deployment.
+
+---
+
+## Lambda Returns 500
+
+Inspect the Lambda logs:
+
+```
+aws logs tail /aws/lambda/allan-feedback-handler --follow --region eu-central-1
+```
+
+Possible causes include:
+
+- missing DynamoDB table
+- insufficient Lambda IAM permissions
+- invalid environment configuration
+- unexpected DynamoDB error
+- application exception
+
+The API intentionally returns a generic internal-error response rather than exposing internal exception details.
+
+---
+
+## Lambda Code Changes Do Not Appear
+
+Rebuild the deployment package:
+
+```
+Compress-Archive `
+  -Path .\lambda\feedback_handler.py `
+  -DestinationPath .\lambda\feedback_handler.zip `
+  -Force
+```
+
+Then redeploy:
+
+```
+cd terraform
+terraform plan
+terraform apply
+```
+
+---
+
+## GET Returns 401
+
+This is expected when the protected route is called without a valid Cognito JWT.
+
+Verify that the request includes:
+
+```
+Authorization: Bearer <JWT_TOKEN>
+```
+
+Do not store the token in Git.
+
+---
+
+## Browser CORS Problems
+
+CORS is already configured in API Gateway.
+
+The development configuration permits all origins and supports the required API headers and methods.
+
+If a production frontend is deployed, replace the wildcard origin with the trusted frontend domain.
+
+---
+
+# Documentation
+
+Detailed project documentation is available under `docs/`.
+
+| Document | Purpose |
+| --- | --- |
+| `docs/api/api-design.md` | API routes, validation, authentication, and error handling |
+| `docs/monitoring.md` | CloudWatch dashboard, metrics, logs, and alarm |
+| `docs/testing.md` | Functional, validation, authentication, and Terraform tests |
+| `docs/cost-analysis.md` | Cost drivers, serverless economics, and scaling |
+| `docs/well-architected-review.md` | Security, reliability, performance, cost, scalability, and operations |
+
+---
+
+# Future Improvements
+
+Potential production improvements include:
+
+- replace DynamoDB Scan with Query
+- implement pagination
+- create suitable DynamoDB secondary indexes
+- restrict CORS to a trusted frontend
+- introduce API throttling and abuse protection
+- consider AWS WAF
+- add API Gateway 5xx alarms
+- add Lambda throttling alarms
+- add DynamoDB throttling alarms
+- implement structured logging
+- introduce automated tests
+- implement CI/CD
+- use remote Terraform state
+- create separate dev, staging, and production environments
+- add a frontend application
+- evaluate asynchronous processing for high-volume workloads
+
+---
+
+# Cleanup
+
+To destroy the AWS infrastructure:
+
+```
+cd terraform
+terraform plan -destroy
+```
+
+Review the resources that will be deleted.
+
+Then run:
+
+```
+terraform destroy
+```
+
+Destroying the environment can delete application resources and stored feedback data.
+
+Do not destroy an environment containing data that must be retained without first considering the required backup or recovery process.
+
+---
+
+# Project Status
+
+The project implements the core requirements of the AWS Serverless Customer Feedback System:
+
+- public feedback submission
+- protected feedback retrieval
+- input validation
+- DynamoDB persistence
+- Cognito authentication
+- least-privilege IAM access
+- CloudWatch logging and monitoring
+- Lambda error alarm
+- DynamoDB Point-in-Time Recovery
+- Terraform infrastructure as code
+- API testing
+- security testing
+- Well-Architected review
+- cost and scalability analysis
+
+---
+
+## Author
+
+**Allan Mwangi**
+
+AWS Serverless Customer Feedback System

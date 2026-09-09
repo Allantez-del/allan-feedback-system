@@ -13,8 +13,8 @@ resource "aws_dynamodb_table" "feedback" {
   }
 
   tags = {
-    Project     = "Allan Feedback System"
-    Environment = "dev"
+    Project     = var.project_name
+    Environment = var.environment
   }
 }
 
@@ -70,8 +70,8 @@ resource "aws_cloudwatch_log_group" "feedback_lambda" {
   retention_in_days = 14
 
   tags = {
-    Project     = "Allan Feedback System"
-    Environment = "dev"
+    Project     = var.project_name
+    Environment = var.environment
   }
 }
 
@@ -97,8 +97,8 @@ resource "aws_lambda_function" "feedback" {
   ]
 
   tags = {
-    Project     = "Allan Feedback System"
-    Environment = "dev"
+    Project     = var.project_name
+    Environment = var.environment
   }
 }
 
@@ -126,8 +126,8 @@ resource "aws_apigatewayv2_api" "feedback_api" {
   }
 
   tags = {
-    Project     = "Allan Feedback System"
-    Environment = "dev"
+    Project     = var.project_name
+    Environment = var.environment
   }
 }
 
@@ -181,8 +181,8 @@ resource "aws_apigatewayv2_stage" "default" {
   auto_deploy = true
 
   tags = {
-    Project     = "Allan Feedback System"
-    Environment = "dev"
+    Project     = var.project_name
+    Environment = var.environment
   }
 }
 
@@ -213,8 +213,8 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   }
 
   tags = {
-    Project     = "Allan Feedback System"
-    Environment = "dev"
+    Project     = var.project_name
+    Environment = var.environment
   }
 }
 
@@ -230,8 +230,8 @@ resource "aws_cognito_user_pool" "staff" {
   }
 
   tags = {
-    Project     = "Allan Feedback System"
-    Environment = "dev"
+    Project     = var.project_name
+    Environment = var.environment
   }
 }
 
@@ -263,7 +263,7 @@ resource "aws_cloudwatch_dashboard" "feedback" {
 
         properties = {
           title  = "Lambda - Requests and Errors"
-          region = "eu-central-1"
+          region = var.aws_region
           view   = "timeSeries"
 
           metrics = [
@@ -309,7 +309,7 @@ resource "aws_cloudwatch_dashboard" "feedback" {
 
         properties = {
           title  = "Lambda - Duration"
-          region = "eu-central-1"
+          region = var.aws_region
           view   = "timeSeries"
 
           metrics = [
@@ -337,7 +337,7 @@ resource "aws_cloudwatch_dashboard" "feedback" {
 
         properties = {
           title  = "API Gateway - Requests and Errors"
-          region = "eu-central-1"
+          region = var.aws_region
           view   = "timeSeries"
 
           metrics = [
@@ -389,7 +389,7 @@ resource "aws_cloudwatch_dashboard" "feedback" {
 
         properties = {
           title  = "DynamoDB - Capacity"
-          region = "eu-central-1"
+          region = var.aws_region
           view   = "timeSeries"
 
           metrics = [
@@ -426,7 +426,7 @@ resource "aws_cloudwatch_dashboard" "feedback" {
 
         properties = {
           title  = "DynamoDB - Throttling"
-          region = "eu-central-1"
+          region = var.aws_region
           view   = "timeSeries"
 
           metrics = [
