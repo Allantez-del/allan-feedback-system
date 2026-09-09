@@ -1,3 +1,8 @@
 {
+  "requestContext": {
+    "http": {
+      "method": "POST"
+    }
+  },
   "body": "{\"customerName\":\"Jane Doe\",\"email\":\"jane@example.com\",\"rating\":5,\"category\":\"service\",\"message\":\"The customer support was very helpful.\"}"
 }

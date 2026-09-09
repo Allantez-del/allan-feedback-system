@@ -55,7 +55,8 @@ resource "aws_iam_role_policy" "lambda_dynamodb" {
         Effect = "Allow"
 
         Action = [
-          "dynamodb:PutItem"
+          "dynamodb:PutItem",
+          "dynamodb:Scan"
         ]
 
         Resource = aws_dynamodb_table.feedback.arn
@@ -105,6 +106,25 @@ resource "aws_apigatewayv2_api" "feedback_api" {
   name          = "allan-feedback-api"
   protocol_type = "HTTP"
 
+  cors_configuration {
+    allow_headers = [
+      "content-type",
+      "authorization"
+    ]
+
+    allow_methods = [
+      "GET",
+      "POST",
+      "OPTIONS"
+    ]
+
+    allow_origins = [
+      "*"
+    ]
+
+    max_age = 300
+  }
+
   tags = {
     Project     = "Allan Feedback System"
     Environment = "dev"
@@ -124,6 +144,34 @@ resource "aws_apigatewayv2_route" "post_feedback" {
 
   route_key = "POST /feedback"
   target    = "integrations/${aws_apigatewayv2_integration.feedback_lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_feedback" {
+  api_id = aws_apigatewayv2_api.feedback_api.id
+
+  route_key          = "GET /feedback"
+  target             = "integrations/${aws_apigatewayv2_integration.feedback_lambda.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.staff_jwt.id
+}
+
+resource "aws_apigatewayv2_authorizer" "staff_jwt" {
+  api_id = aws_apigatewayv2_api.feedback_api.id
+
+  authorizer_type = "JWT"
+  name            = "allan-feedback-staff-jwt"
+
+  identity_sources = [
+    "$request.header.Authorization"
+  ]
+
+  jwt_configuration {
+    audience = [
+      aws_cognito_user_pool_client.staff.id
+    ]
+
+    issuer = "https://cognito-idp.eu-central-1.amazonaws.com/${aws_cognito_user_pool.staff.id}"
+  }
 }
 
 resource "aws_apigatewayv2_stage" "default" {
@@ -168,4 +216,243 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
     Project     = "Allan Feedback System"
     Environment = "dev"
   }
+}
+
+resource "aws_cognito_user_pool" "staff" {
+  name = "allan-feedback-staff"
+
+  password_policy {
+    minimum_length    = 8
+    require_lowercase = true
+    require_numbers   = true
+    require_symbols   = true
+    require_uppercase = true
+  }
+
+  tags = {
+    Project     = "Allan Feedback System"
+    Environment = "dev"
+  }
+}
+
+resource "aws_cognito_user_pool_client" "staff" {
+  name         = "allan-feedback-staff-client"
+  user_pool_id = aws_cognito_user_pool.staff.id
+
+  generate_secret = false
+
+  explicit_auth_flows = [
+    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH"
+  ]
+
+  prevent_user_existence_errors = "ENABLED"
+}
+
+resource "aws_cloudwatch_dashboard" "feedback" {
+  dashboard_name = "allan-feedback-dashboard"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "metric"
+        x      = 0
+        y      = 0
+        width  = 12
+        height = 6
+
+        properties = {
+          title  = "Lambda - Requests and Errors"
+          region = "eu-central-1"
+          view   = "timeSeries"
+
+          metrics = [
+            [
+              "AWS/Lambda",
+              "Invocations",
+              "FunctionName",
+              aws_lambda_function.feedback.function_name,
+              {
+                stat = "Sum"
+              }
+            ],
+            [
+              ".",
+              "Errors",
+              ".",
+              ".",
+              {
+                stat = "Sum"
+              }
+            ],
+            [
+              ".",
+              "Throttles",
+              ".",
+              ".",
+              {
+                stat = "Sum"
+              }
+            ]
+          ]
+
+          period = 300
+        }
+      },
+
+      {
+        type   = "metric"
+        x      = 12
+        y      = 0
+        width  = 12
+        height = 6
+
+        properties = {
+          title  = "Lambda - Duration"
+          region = "eu-central-1"
+          view   = "timeSeries"
+
+          metrics = [
+            [
+              "AWS/Lambda",
+              "Duration",
+              "FunctionName",
+              aws_lambda_function.feedback.function_name,
+              {
+                stat = "Average"
+              }
+            ]
+          ]
+
+          period = 300
+        }
+      },
+
+      {
+        type   = "metric"
+        x      = 0
+        y      = 6
+        width  = 12
+        height = 6
+
+        properties = {
+          title  = "API Gateway - Requests and Errors"
+          region = "eu-central-1"
+          view   = "timeSeries"
+
+          metrics = [
+            [
+              "AWS/ApiGateway",
+              "Count",
+              "ApiId",
+              aws_apigatewayv2_api.feedback_api.id,
+              "Stage",
+              aws_apigatewayv2_stage.default.name,
+              {
+                stat = "Sum"
+              }
+            ],
+            [
+              ".",
+              "4xx",
+              ".",
+              ".",
+              ".",
+              ".",
+              {
+                stat = "Sum"
+              }
+            ],
+            [
+              ".",
+              "5xx",
+              ".",
+              ".",
+              ".",
+              ".",
+              {
+                stat = "Sum"
+              }
+            ]
+          ]
+
+          period = 300
+        }
+      },
+
+      {
+        type   = "metric"
+        x      = 12
+        y      = 6
+        width  = 12
+        height = 6
+
+        properties = {
+          title  = "DynamoDB - Capacity"
+          region = "eu-central-1"
+          view   = "timeSeries"
+
+          metrics = [
+            [
+              "AWS/DynamoDB",
+              "ConsumedReadCapacityUnits",
+              "TableName",
+              aws_dynamodb_table.feedback.name,
+              {
+                stat = "Sum"
+              }
+            ],
+            [
+              ".",
+              "ConsumedWriteCapacityUnits",
+              ".",
+              ".",
+              {
+                stat = "Sum"
+              }
+            ]
+          ]
+
+          period = 300
+        }
+      },
+
+      {
+        type   = "metric"
+        x      = 0
+        y      = 12
+        width  = 24
+        height = 6
+
+        properties = {
+          title  = "DynamoDB - Throttling"
+          region = "eu-central-1"
+          view   = "timeSeries"
+
+          metrics = [
+            [
+              "AWS/DynamoDB",
+              "ReadThrottleEvents",
+              "TableName",
+              aws_dynamodb_table.feedback.name,
+              {
+                stat = "Sum"
+              }
+            ],
+            [
+              ".",
+              "WriteThrottleEvents",
+              ".",
+              ".",
+              {
+                stat = "Sum"
+              }
+            ]
+          ]
+
+          period = 300
+        }
+      }
+    ]
+  })
 }

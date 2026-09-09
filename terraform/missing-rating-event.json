@@ -1,0 +1,8 @@
+{
+  "requestContext": {
+    "http": {
+      "method": "POST"
+    }
+  },
+  "body": "{\"category\":\"service\",\"message\":\"Testing missing rating validation.\"}"
+}
