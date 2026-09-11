@@ -69,6 +69,10 @@ A serverless architecture was selected because feedback traffic can be irregular
 
 # Architecture
 
+![Final AWS Serverless Customer Feedback System Architecture](final-architecture.png)
+
+The public `POST /feedback` route accepts customer feedback, while `GET /feedback` is protected by Amazon Cognito. API Gateway invokes AWS Lambda, Lambda reads and writes feedback in DynamoDB, CloudWatch provides logging and monitoring, and Terraform manages the infrastructure as code.
+
 ## High-Level Architecture
 
 ```mermaid

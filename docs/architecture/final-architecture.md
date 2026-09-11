@@ -11,6 +11,10 @@ The architecture separates public customer submission from authenticated staff r
 
 Amazon API Gateway provides the HTTP entry point, AWS Lambda contains application logic, and Amazon DynamoDB stores feedback records. Amazon CloudWatch provides logs, metrics, dashboards, and Lambda error monitoring.
 
+## Final Architecture Diagram
+
+![Final AWS Serverless Customer Feedback System Architecture](../../final-architecture.png)
+
 ---
 
 # Architecture Diagram
